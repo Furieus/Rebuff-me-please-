@@ -2,7 +2,7 @@
 ## Title: Rebuff
 ## Notes: Buff reminder for class buffs
 ## Author: Furieus
-## Version: 0.3
+## Version: 0.4
 
 ## SavedVariables: RebuffDB
 ## SavedVariablesPerCharacter: RebuffCharDB
@@ -16,3 +16,4 @@ Themes.lua
 UI.lua
 Preview.lua
 Rebuff_Config.lua
+Pets.lua

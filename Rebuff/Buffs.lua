@@ -3,26 +3,44 @@ Rebuff.CLASS_BUFFS = {
         spellID = 1126,
         buffs = { "Mark of the Wild" },
         shortName = "Mark of the Wild",
+        trackMode = "group",
     },
     MAGE = {
         spellID = 1459,
         buffs = { "Arcane Intellect" },
         shortName = "Arcane Intellect",
+        trackMode = "group",
     },
     PRIEST = {
         spellID = 21562,
         buffs = { "Power Word: Fortitude", "Fortitude" },
         shortName = "Fortitude",
+        trackMode = "group",
     },
     WARRIOR = {
         spellID = 6673,
         buffs = { "Battle Shout" },
         shortName = "Battle Shout",
+        trackMode = "group",
     },
     SHAMAN = {
         spellID = 462854, -- Skyfury
         buffs = { "Skyfury" },
         shortName = "Skyfury",
+        trackMode = "group",
+    },
+    WARLOCK = {
+        spellID = 20707, -- Soulstone display/default icon reference
+        knownSpellIDs = {
+            20707,
+            693,
+        },
+        buffs = {
+            "Soulstone",
+            "Soulstone Resurrection",
+        },
+        shortName = "Soulstone",
+        trackMode = "single",
     },
 }
 
@@ -46,7 +64,6 @@ function Rebuff.GetSpellIcon(spellID)
         return nil
     end
 
-    -- Strongest modern path
     if C_Spell and C_Spell.GetSpellTexture then
         local texture = C_Spell.GetSpellTexture(spellID)
         if texture then
@@ -54,7 +71,6 @@ function Rebuff.GetSpellIcon(spellID)
         end
     end
 
-    -- Spell info fallback
     if C_Spell and C_Spell.GetSpellInfo then
         local info = C_Spell.GetSpellInfo(spellID)
         if info then
@@ -67,7 +83,6 @@ function Rebuff.GetSpellIcon(spellID)
         end
     end
 
-    -- Legacy fallback
     if GetSpellTexture then
         local texture = GetSpellTexture(spellID)
         if texture then
@@ -75,7 +90,6 @@ function Rebuff.GetSpellIcon(spellID)
         end
     end
 
-    -- Known manual fallbacks for tracked buffs
     if spellID == 1126 then
         return 136078   -- Mark of the Wild
     elseif spellID == 1459 then
@@ -84,6 +98,10 @@ function Rebuff.GetSpellIcon(spellID)
         return 135987   -- Fortitude
     elseif spellID == 6673 then
         return 132333   -- Battle Shout
+    elseif spellID == 20707 or spellID == 693 then
+        return 136210   -- Soulstone fallback
+    elseif spellID == 688 then
+        return 136218   -- Summon Imp fallback
     end
 
     return 134400
@@ -95,58 +113,107 @@ end
 
 local function InRelevantInstance()
     local inInstance, instanceType = IsInInstance()
-    return inInstance and (instanceType == "party" or instanceType == "raid")
+
+    if not inInstance then
+        return false
+    end
+
+    if instanceType == "party" or instanceType == "raid" then
+        return true
+    end
+
+    if RebuffCharDB and RebuffCharDB.enableSolo and instanceType ~= "none" then
+        return true
+    end
+
+    return false
 end
 
 local function CanCheck()
     if not InRelevantInstance() then
         return false
     end
+
     if InCombatLockdown() then
         return false
     end
+
     return true
+end
+
+local function IsSpellKnownSafe(spellID)
+    if not spellID then
+        return false
+    end
+
+    if C_SpellBook and C_SpellBook.IsSpellKnown then
+        return C_SpellBook.IsSpellKnown(spellID)
+    elseif IsSpellKnown then
+        return IsSpellKnown(spellID)
+    end
+
+    return false
+end
+
+local function GetKnownSpellIDForClassData(classData)
+    if not classData then
+        return nil
+    end
+
+    if classData.knownSpellIDs then
+        for _, candidateID in ipairs(classData.knownSpellIDs) do
+            if IsSpellKnownSafe(candidateID) then
+                return candidateID
+            end
+        end
+    end
+
+    if classData.spellID and IsSpellKnownSafe(classData.spellID) then
+        return classData.spellID
+    end
+
+    return nil
 end
 
 local function PlayerProvidesTrackedBuff()
     local classData = Rebuff.CLASS_BUFFS[Rebuff.playerClass]
     if not classData then
         Rebuff.Debug("No tracked buff for class: " .. tostring(Rebuff.playerClass))
-        return nil, nil
+        return nil, nil, nil
     end
 
-    local spellID = classData.spellID
-    local known = false
-
-    if C_SpellBook and C_SpellBook.IsSpellKnown then
-        known = C_SpellBook.IsSpellKnown(spellID)
-    elseif IsSpellKnown then
-        known = IsSpellKnown(spellID)
+    local knownSpellID = GetKnownSpellIDForClassData(classData)
+    if not knownSpellID then
+        return nil, nil, nil
     end
 
-    if not known then
-        return nil, nil
-    end
+    local displaySpellID = classData.spellID or knownSpellID
+    local spellName = Rebuff.GetSpellName(displaySpellID) or classData.shortName
 
-    local spellName = Rebuff.GetSpellName(spellID)
     if not spellName then
-        return nil, nil
+        return nil, nil, nil
     end
 
-    return spellID, spellName
+    return displaySpellID, spellName, classData
 end
 
-local function UnitHasBuff(unit, spellName)
-    if not UnitExists(unit) then
+local function UnitHasAnyTrackedBuff(unit, buffNames)
+    if not UnitExists(unit) or not buffNames then
         return false
     end
 
-    if C_UnitAuras and C_UnitAuras.GetAuraDataBySpellName then
-        return C_UnitAuras.GetAuraDataBySpellName(unit, spellName, "HELPFUL") ~= nil
-    end
-
-    if AuraUtil and AuraUtil.FindAuraByName then
-        return AuraUtil.FindAuraByName(spellName, unit, "HELPFUL") ~= nil
+    for _, spellName in ipairs(buffNames) do
+        if spellName then
+            if C_UnitAuras and C_UnitAuras.GetAuraDataBySpellName then
+                if C_UnitAuras.GetAuraDataBySpellName(unit, spellName, "HELPFUL") ~= nil then
+                    return true
+                end
+            elseif AuraUtil and AuraUtil.FindAuraByName then
+                if AuraUtil.FindAuraByName(spellName, unit, "HELPFUL") ~= nil then
+                    return true
+                end
+            end
+        end
     end
 
     return false
@@ -183,12 +250,12 @@ local function GetUnitsToCheck()
     return units
 end
 
-local function GetMissingBuffList(spellName)
+local function GetMissingBuffList(buffNames)
     local missing = {}
 
     for _, unit in ipairs(GetUnitsToCheck()) do
         if UnitExists(unit) and not UnitIsDeadOrGhost(unit) then
-            if not UnitHasBuff(unit, spellName) then
+            if not UnitHasAnyTrackedBuff(unit, buffNames) then
                 if UnitIsUnit(unit, "player") then
                     table.insert(missing, "You")
                 else
@@ -199,6 +266,18 @@ local function GetMissingBuffList(spellName)
     end
 
     return missing
+end
+
+local function AnyUnitHasTrackedBuff(buffNames)
+    for _, unit in ipairs(GetUnitsToCheck()) do
+        if UnitExists(unit) and not UnitIsDeadOrGhost(unit) then
+            if UnitHasAnyTrackedBuff(unit, buffNames) then
+                return true, unit
+            end
+        end
+    end
+
+    return false, nil
 end
 
 local function CanPlayerCastNow(spellID)
@@ -263,15 +342,46 @@ Rebuff.CheckBuffs = function()
         return
     end
 
-    local spellID, spellName = PlayerProvidesTrackedBuff()
-    if not spellID or not spellName then
+    local spellID, spellName, classData = PlayerProvidesTrackedBuff()
+    if not spellID or not spellName or not classData then
         if Rebuff.ResetReminderState then
             Rebuff.ResetReminderState()
         end
         return
     end
 
-    local missing = GetMissingBuffList(spellName)
+    if classData.trackMode == "single" then
+        local hasTrackedBuff = AnyUnitHasTrackedBuff(classData.buffs)
+
+        if hasTrackedBuff then
+            if Rebuff.ResetReminderState then
+                Rebuff.ResetReminderState()
+            end
+            return
+        end
+
+        -- Soulstone should not nag while unavailable/cooling down
+        if not CanPlayerCastNow(spellID) then
+            if Rebuff.ResetReminderState then
+                Rebuff.ResetReminderState()
+            end
+            return
+        end
+
+        local msg = string.format("Cast %s - no target currently has it", spellName)
+
+        if ShouldShow(msg) then
+            Rebuff.PlayReminderSound()
+            if Rebuff.ShowReminderFrame then
+                Rebuff.ShowReminderFrame(spellID, msg)
+            end
+            print("|cffffcc00Rebuff:|r " .. msg)
+        end
+
+        return
+    end
+
+    local missing = GetMissingBuffList(classData.buffs)
     if not missing or #missing == 0 then
         if Rebuff.ResetReminderState then
             Rebuff.ResetReminderState()

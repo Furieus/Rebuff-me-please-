@@ -4,6 +4,7 @@ local previewIcons = {
     { spellID = 21562 },  -- Fortitude
     { spellID = 6673 },   -- Battle Shout
     { spellID = 462854 }, -- Skyfury
+	{ spellID = 20707 }, -- Soulstone
 }
 
 local previewMessages = {
